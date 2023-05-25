@@ -1,0 +1,98 @@
+stages:
+  - build
+  - test
+variables:
+  PIPELINE_DIR: $CI_PROJECT_DIR/.gitlab-ci.d
+  BACKEND_REPO: https://example.com/backend
+  FRONTEND_REPO: https://example.com/frontend
+image: alpine
+.aws-shared-runner:
+  variables:
+    AWS_ACCESS_KEY_ID: $AWS_SHARED_RUNNER_KEY_ID
+    AWS_SECRET_ACCESS_KEY: $AWS_SHARED_RUNNER_KEY
+build-backend:
+  extends:
+    - .aws-shared-runner
+  stage: build
+  tags:
+    - saas-linux-medium-amd64
+  services:
+    - docker:dind
+  only:
+    - branches
+  except:
+    - /^gitlab-ci.*/
+  variables:
+    CONTEXT: src
+    NAME: backend
+    REPO: $BACKEND_REPO
+    TAG: $CI_COMMIT_SHA
+    REF: $CI_COMMIT_SHA
+    CACHE_DIR: $CI_PROJECT_DIR/buildx
+    DOCKER_HOST: tcp://docker:2375
+  cache:
+    key: $CI_COMMIT_REF_SLUG-build-backend
+    when: on_success
+    paths:
+      - "$CI_PROJECT_DIR/buildx"
+  script:
+    - . "$PIPELINE_DIR/scripts/build-container-image.sh"
+build-frontend:
+  extends:
+    - .aws-shared-runner
+  stage: build
+  tags:
+    - saas-linux-medium-amd64
+  services:
+    - docker:dind
+  only:
+    - branches
+  except:
+    - /^gitlab-ci.*/
+  variables:
+    CONTEXT: frontend
+    NAME: frontend
+    REPO: $FRONTEND_REPO
+    TAG: $CI_COMMIT_SHA
+    REF: $CI_COMMIT_SHA
+    CACHE_DIR: $CI_PROJECT_DIR/buildx
+    DOCKER_HOST: tcp://docker:2375
+  cache:
+    key: $CI_COMMIT_REF_SLUG-build-frontend
+    when: on_success
+    paths:
+      - "$CI_PROJECT_DIR/buildx"
+  script:
+    - . "$PIPELINE_DIR/scripts/build-container-image.sh"
+test-backend:
+  extends:
+    - .aws-shared-runner
+  stage: test
+  tags:
+    - saas-linux-large-amd64
+  services:
+    - docker:dind
+  only:
+    - branches
+  except:
+    - /^gitlab-ci.*/
+  needs:
+    - build-backend
+  artifacts:
+    reports:
+      junit: $CI_PROJECT_DIR/report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: $CI_PROJECT_DIR/coverage.xml
+  coverage: '/^TOTAL(?:\s+\d+){4}\s+(\d{1,3}%)$/'
+  timeout: 10m
+  variables:
+    CONTEXT: $PIPELINE_DIR/test-backend/
+    REPO: $BACKEND_REPO
+    TAG: $CI_COMMIT_SHA
+    COVERAGE_PATH_CORRECTION: $CI_BUILDS_DIR/$CI_PROJECT_PATH/src
+    DOCKER_HOST: tcp://docker:2375
+  script:
+    - . "$PIPELINE_DIR/scripts/test-backend-image.sh"
+  after_script:
+    - . "$PIPELINE_DIR/scripts/after-test-backend-image.sh"
